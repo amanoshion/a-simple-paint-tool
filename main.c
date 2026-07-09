@@ -9,14 +9,15 @@
 
 #include <string.h>
 #include "format.h"
-#define ERROR -1
-#define OK 1
+#include "operation.h"
 
 #define S 32
 #define M 64
 #define L 128
 #define XL 256
 #define XXL 512
+
+
 
 FILE* open_new(const char *path, const char *name) {
     DIR *dir = opendir(path);
@@ -50,6 +51,38 @@ FILE* open_new(const char *path, const char *name) {
     return fp;
 }
 
+int analysis_command(const char *buffer, FILE *fp, Detail *detail) {
+    int argc = 0;
+    unsigned buf_1[5] = {0};
+    unsigned char color[3] = {0};
+    int pos1_x, pos1_y = 0;
+    int pos2_x, pos2_y = 0;
+    argc = sscanf(buffer, "%s %s %d %d %d %d", buf_1, color, pos1_x, pos1_y, pos2_x, pos2_y);
+    if (argc < 1) return ERROR;
+    if (strncmp(buf_1, "exit", 4) == 0 && strlen(buf_1) == 4) {
+        exit();
+    } else if (strncmp(buf_1, "help", 4) == 0 && strlen(buf_1) == 4) {
+        help();
+    } else if (strncmp(buf_1, "show", 4) == 0 && strlen(buf_1) == 4) {
+        show();
+    } else if (strncmp(buf_1, "clear", 5) == 0 && strlen(buf_1) == 5) {
+        clear();
+    } else if (strncmp(buf_1, "point", 5) == 0 && strlen(buf_1) == 5) {
+        if (argc < 4) return ERROR;
+        point(fp, detail, color, pos1_x, pos1_y);
+    } else if (strncmp(buf_1, "line", 4) == 0 && strlen(buf_1) == 4) {
+        if (argc < 6) return ERROR;
+        line();
+    } else if (strncmp(buf_1, "rect", 4) == 0 && strlen(buf_1) == 4) {
+        if (argc < 6) return ERROR;
+        rect();
+    } else if (strncmp(buf_1, "line", 4) == 0 && strlen(buf_1) == 4) {
+        if (argc < 5) return ERROR;
+        circle();
+    } else {
+        return ERROR;
+    }
+}
 void help() {
     printf("========================================\n");
     printf("=\tpaint command\n");
@@ -59,10 +92,10 @@ void help() {
     printf("show\n");
     printf("================main====================\n");
     printf("clear\n");
-    printf("point + <pixelX> <pixelY> <color>\n");
-    printf("line + <pixelX_start> <pixelY_start> <pixelX_end> <pixelY_end> <color>\n");
-    printf("rect + <pixelX_start> <pixelY_start> <pixelX_end> <pixelY_end> <color>\n");
-    printf("circle + <pixelX> <pixelY> <radius> <color>\n");
+    printf("point + <color> <pixelX> <pixelY>\n");
+    printf("line + <color> <pixelX_start> <pixelY_start> <pixelX_end> <pixelY_end>\n");
+    printf("rect + <color> <pixelX_start> <pixelY_start> <pixelX_end> <pixelY_end>\n");
+    printf("circle + <color> <pixelX> <pixelY> <radius>\n");
     printf("========================================\n");
 
 }
@@ -75,17 +108,39 @@ int main(int argc, const char *argv[]) {
     FILE *fp = open_new(argv[1], argv[2]);
     if (fp == NULL) return ERROR;
 
+    Detail file_detail;
+    file_detail.width = 0;
+    file_detail.height = 0;
+    file_detail.padding = 0;
+    file_detail.one_piexel_bit_size = 0;
+    file_detail.data = NULL;
+
+    Detail *detail = &file_detail;
+    
+    detail->width = atoi(argv[3]);
+    detail->height = atoi(argv[4]);
+    strncpy(detail->color, argv[6], 3);
     Deep_Type type = -1;
-    if (strncmp(argv[6], "1", strlen(argv[6])) == 0) type = bit_1;
-    if (strncmp(argv[6], "4", strlen(argv[6])) == 0) type = bit_4;
-    if (strncmp(argv[6], "8", strlen(argv[6])) == 0) type = bit_8;
-    if (strncmp(argv[6], "16", strlen(argv[6])) == 0) type = bit_16;
-    if (strncmp(argv[6], "24", strlen(argv[6])) == 0) type = bit_24;
-    if (strncmp(argv[6], "32", strlen(argv[6])) == 0) type = bit_32;
+    if (strncmp(argv[6], "1", strlen(argv[6])) == 0) {
+        detail->type = bit_1;
+        detail->one_piexel_bit_size = 1;
+        detail->image_offset = 62;
+    }else if (strncmp(argv[6], "24", strlen(argv[6])) == 0) {
+        detail->type = bit_24;
+        detail->one_piexel_bit_size = 24;
+        detail->image_offset = 54;
+    } 
     if (type == -1) return ERROR;
 
-    make_palete(type);
-    ini_image_data(type);
+    int padding = ini_image_data(fp, detail);
+    detail->padding = padding;
+    detail->pixel_num = (detail->width + detail->padding)*detail->height;
+    
+
+    detail->data = create_image_data(fp, detail);
+    write_image_data(fp, detail, detail->data);
+
+    create_and_write_file_data(fp, detail);
 
     help();
     char command_buffer[M] = {0};
@@ -93,9 +148,8 @@ int main(int argc, const char *argv[]) {
     while(isContinue) {
         memset(command_buffer, 0, M);
         scanf("%s", command_buffer);
-        analysis_command(command_buffer);
+        analysis_command(command_buffer, fp, detail);
         
-        
-        
+               
     }
 }
