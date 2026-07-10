@@ -1,13 +1,15 @@
 #ifndef FORMAT_H
 #define FORMAT_H
 
+#include <stdio.h>
 #include <stdint.h>
 #define ERROR -1
 #define OK 1
 
 typedef enum {
     bit_1,
-    bit_24
+    bit_24,
+    undefined
 } Deep_Type;
 
 typedef struct {
@@ -25,40 +27,43 @@ typedef struct Detail {
     int height;
     int padding;
     Deep_Type type;
-    int one_piexel_bit_size;
-    int pixel_num;
+    int one_pixel_bit_size;
+    int image_size;
     int image_offset;
-    unsigned char color[3];
+    unsigned char bg_color[3];
     void *data;
 } Detail;
 
 typedef struct {
-        uint16_t type;  //='B' 'M'
-        uint32_t size;  // 14 + 40 + palette size + size_image + padding size
-        uint16_t reserved1; //=0
-        uint16_t reserved2; //=0
-        uint32_t off_bits;  //[photo pixel data's offset] 
+        unsigned char type[2];  //='B' 'M'
+        unsigned char size[4];  // 14 + 40 + palette size + size_image + padding size
+        unsigned char reserved1[2]; //=0
+        unsigned char reserved2[2]; //=0
+        unsigned char off_bits[4];  //[photo pixel data's offset] 
         //-> 1 : 14 + 40 + 2*4 = 62, 4 : 14 + 40 + 16*4 = 118
         //-> 8 : 14 + 40 + 256*4 = 1078, 16/24/32 : 54
                             
 } bmp_file_header_t;    //size : 14 byte
 
 typedef struct {
-        uint32_t size; //=40
-        int32_t width;  // pixel num only
-        int32_t height;  // pixel num only
-        uint16_t planes;    //=1
-        uint16_t bit_count;     // depth
-        uint32_t compression;   //=0
-        uint32_t size_image;    // image data's byte size, including padding size
-        uint32_t x_pels_permeter;   //=3780
-        uint32_t y_pels_permeter;   //=3780
-        uint32_t clr_used;      //=0
-        uint32_t clr_important; //=0
+        unsigned char size[4]; //=40
+        unsigned char width[4];  // pixel num only
+        unsigned char height[4];  // pixel num only
+        unsigned char planes[2];    //=1
+        unsigned char bit_count[2];     // depth
+        unsigned char compression[4];   //=0
+        unsigned char size_image[4];    // image data's byte size, including padding size
+        unsigned char x_pels_permeter[4];   //=3780
+        unsigned char y_pels_permeter[4];   //=3780
+        unsigned char clr_used[4];      //=0
+        unsigned char clr_important[4]; //=0
 } bmp_file_info_t;    //size : 40 byte
 
-int create_image_data(FILE *fp, Detail *detail);
-void write_image_data(FILE *fp, Detail *detail, void *data);
+int ini_image_data(FILE *fp, Detail *detail);
+void get_a_pixel_color(unsigned char *dst_color, Detail *src_detail, FILE *fp_src, int pixel_offset);
+
+void *update_image_data(FILE *fp, Detail *detail, Detail *src_detail, FILE *fp_src);
+void write_image_data(FILE *fp, Detail *detail);
 
 void buffer_reverse(unsigned char *buffer);
 int write_file_data(FILE *fp, bmp_file_header_t header, bmp_file_info_t info, Detail *detail);
