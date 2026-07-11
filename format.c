@@ -3,245 +3,206 @@
 #include <string.h>
 #include "format.h"
 
-int ini_image_data(FILE *fp, Detail *detail) {
-    int padding = 0;
-    int p_size = 0;
+
+
+void ini_image_data(FILE *fp, Detail *detail) {
     switch(detail->type) {
         case bit_1:
-            p_size = detail->one_pixel_bit_size;
+            detail->padding_in_bits = (32 - (detail->width * 1) % 32) % 32;
+            detail->image_size = ((detail->width + detail->padding_in_bits) * detail->height) / 8;
+            detail->padding_in_bytes = 0;  
             break;
+            
         case bit_24:
-            p_size = detail->one_pixel_bit_size;
+            detail->padding_in_bytes = (4 - (detail->width * 3) % 4) % 4;
+            detail->image_size = (detail->width * 3 + detail->padding_in_bytes) * detail->height;
+            detail->padding_in_bits = 0;   
+            break;
+            
+        default:
+            printf("Error: unsupported image type\n");
             break;
     }
-    int ret;
-    if ((ret = ((p_size*detail->width) % 32)) != 0) {
-        padding = 32 - ret;
-    }
-    return padding;
 }
 
-void get_a_pixel_color(unsigned char *dst_color, Detail *src_detail, FILE *fp_src, int pixel_offset) { // the pixel_offset start from 1, not 0
+void get_a_pixel_color(char *dst_color, Detail *src_detail, FILE *fp_src, int pixel_offset) { 
     
-    unsigned char color[3] = {0};
-    unsigned char color_bit_1;
+    if (pixel_offset < 0 || pixel_offset >= src_detail->width *src_detail->height) {
+        dst_color[0] = 0;
+        dst_color[1] = 0;
+        dst_color[2] = 0;
+        return;
+    }
+
     switch(src_detail->type) {
         case bit_1:
-            int ret;
-            int bits;
-            int bits_end;
-            int bits_nail;
-            int bytes;
-            unsigned char buffer[1] = {0};
-            bits = (pixel_offset / (src_detail->width + src_detail->padding)) * src_detail->width;//  total pixels of head lines
-            bits_end = pixel_offset - bits;             //  end pixels of the end line
-            if (bits_end > src_detail->width * 8) {
-                memset(color, 0, 3);
-                strncpy(dst_color, color, 3);
-            }  // if target pixel is on padding , return 0
-            bits_nail = bits_end % 8;
+            uint32_t bit_offset = pixel_offset * 1;
+            uint32_t byte_offset = bit_offset / 8;
+            uint32_t bit_in_byte = bit_offset % 8;
 
-            bytes = bits/8 + bits_end/8;
-            bits_nail = bits_end % 8;
-            
-            fseek(fp_src, src_detail->image_offset + bytes, SEEK_SET);
-            fread(buffer, sizeof(uint8_t), 1, fp_src);
-            buffer_reverse(buffer);
-            buffer[0] >>= bits_nail;
-            if (bits_nail & 1) {
-                sprintf(color, "%d", 1);
+            long old_pos = ftell(fp_src);
+
+            fseek(fp_src, src_detail->image_offset + byte_offset, SEEK_SET);
+            uint8_t buffer;
+            fread(&buffer, 1, 1, fp_src);
+
+            uint8_t pixel_bit = (buffer >> (7 - bit_in_byte)) & 0x01;
+
+            dst_color[0] = pixel_bit ? 0xFF : 0x00;
+            dst_color[1] = pixel_bit ? 0xFF : 0x00;
+            dst_color[2] = pixel_bit ? 0xFF : 0x00;
+
+            fseek(fp_src, old_pos, SEEK_SET);
+            break;
+        
+        case bit_24 : {
+            uint32_t bytes_per_row = src_detail->width * 3 + src_detail->padding_in_bytes;
+
+            uint32_t row_start = (pixel_offset / src_detail->width) * bytes_per_row;
+
+            uint32_t pixel_in_row = pixel_offset % src_detail->width;
+
+            if (pixel_in_row >= src_detail->width) {
+                dst_color[0] = 0;
+                dst_color[1] = 0;
+                dst_color[2] = 0;
+                return;
+            }
+
+            uint32_t actual_offset = row_start + pixel_in_row * 3;
+
+            long old_pos = ftell(fp_src);
+
+            fseek(fp_src, src_detail->image_offset + actual_offset, SEEK_SET);
+            uint8_t bgr[3];
+            fread(bgr, 3, 1, fp_src);
+
+            dst_color[0] = bgr[2];
+            dst_color[1] = bgr[1];
+            dst_color[2] = bgr[0];
+
+            fseek(fp_src, old_pos, SEEK_SET);
+            break;
+        }
+
+        default:
+            dst_color[0] = 0;
+            dst_color[1] = 0;
+            dst_color[2] = 0;
+            break;
+    }
+}
+
+void* update_image_data(FILE *fp, Detail *detail, Detail *src_detail, FILE *fp_src) {
+    if (detail->data != NULL) {
+        free(detail->data);
+        detail->data = NULL;
+    }
+    
+    uint8_t *image_data = (uint8_t*)malloc(detail->image_size);
+    if (image_data == NULL) return NULL;
+    
+    memset(image_data, 0, detail->image_size);
+    
+    uint32_t bytes_per_row;
+    if (detail->type == bit_1) {
+        bytes_per_row = (detail->width + detail->padding_in_bits) / 8;
+    } else { // bit_24
+        bytes_per_row = detail->width * 3 + detail->padding_in_bytes;
+    }
+    
+    int pixel_index = 0;
+    for (uint32_t y = 0; y < detail->height; y++) {
+        for (uint32_t x = 0; x < detail->width; x++) {
+            uint8_t color[3] = {0};
+
+            if (src_detail == NULL || fp_src == NULL) {
+                memcpy(color, detail->bg_color, 3);
             } else {
-                sprintf(color, "%d", 0);
+                int src_pixel_index = pixel_index;
+                if (src_detail->width != detail->width || src_detail->height != detail->height) {
+                    int src_x = x % src_detail->width;
+                    int src_y = y % src_detail->height;
+                    src_pixel_index = src_y * src_detail->width + src_x;
+                }
+                get_a_pixel_color(color, src_detail, fp_src, src_pixel_index);
             }
-            strncpy(dst_color, color, 3);
-            break;
-
-        case bit_24:
-            int bytes_2 = pixel_offset*3;
-            if (bytes % (src_detail->width + src_detail->padding) > src_detail->width) {
-                memset(color, 0, 3);
-                strncpy(dst_color, color, 3);
-                break;
-            }  // if target pixel is on padding , return 0
-            unsigned char buffer_2[3] = {0};
-            fread(buffer_2, sizeof(uint8_t), 1, fp_src);
-            strncpy(color, buffer_2, 3);
-            strncpy(dst_color, color, 3);
-            break;
-    }
-}
-void *update_image_data(FILE *fp, Detail *detail,   // updating file's args
-    Detail *src_detail, FILE *fp_src) {  // the reading-from file's args, the pixel_offset start from 1, not 0
-    unsigned char color[3] = {0};
-    int pixel_offset = 1;
-    switch(detail->type) {
-        case bit_1:
-            Pixel_1 *data_1 = malloc(detail->image_size*sizeof(Pixel_1));
-            unsigned char pixel_buffer = 0;
-            unsigned char color_bit_1;
-
-            int k = 0;
-            for (int j = 0; j < detail->height; j++) {
-                for(int i = 0; i < detail->width + detail->padding; i++) {
-                    if (src_detail == NULL || fp_src == NULL || pixel_offset == 0) {
-                        strncpy(color, detail->bg_color, 3);   //get pixel_color
-                    } else {
-                        get_a_pixel_color(color, src_detail, fp_src, pixel_offset++);   //get pixel_color
-
-                    }
-                    color_bit_1 = (color[3]&1);
-                    k++;
-                    pixel_buffer <<= 1;
-                    if (i < detail->width) {
-                        pixel_buffer |= color_bit_1; 
-                    } else {
-                        pixel_buffer |= 0;
-                    }
-                    if (k >= 7) {
-                        data_1[i].bits = pixel_buffer;
-                        k = 0;
-                    }
+            
+            if (detail->type == bit_1) {
+                uint32_t bit_pos = y * (detail->width + detail->padding_in_bits) + x;
+                uint32_t byte_off = bit_pos / 8;
+                uint32_t bit_in_byte = bit_pos % 8;
+                
+                uint8_t bit_value = (color[0] || color[1] || color[2]) ? 1 : 0;
+                
+                if (bit_value) {
+                    image_data[byte_off] |= (0x80 >> bit_in_byte);
+                } else {
+                    image_data[byte_off] &= ~(0x80 >> bit_in_byte);
                 }
-            } 
-            return data_1;
-            break;
-        case bit_24:
-            Pixel_24 *data_24 = malloc(detail->image_size*sizeof(Pixel_24));
-
-            int i = 0;
-            for (int j = 0; j < detail->height; j++) {
-                for(i = 0; i < detail->width; i++) {
-                    if (src_detail == NULL || fp_src == NULL || pixel_offset == 0) {
-                        strncpy(color, detail->bg_color, 3);   //get pixel_color
-                    } else {
-                        get_a_pixel_color(color, src_detail, fp_src, pixel_offset++);   //get pixel_color
-
-                    }
-                    data_24[i].b = color[0];
-                    data_24[i].g = color[1];
-                    data_24[i].r = color[2];
-                }
-                for (int k = 0; k < detail->padding; k++) {
-                    data_24[i].b = 0;
-                    data_24[i].g = 0;
-                    data_24[i].r = 0;
-                }
+            } else { 
+                uint32_t byte_off = y * bytes_per_row + x * 3;
+                image_data[byte_off] = color[2];     // B
+                image_data[byte_off + 1] = color[1];  // G
+                image_data[byte_off + 2] = color[0];  // R
             }
-            return data_24;
-            break;   
+            
+            pixel_index++;
+        }
     }
-}
-
-
-void buffer_reverse(unsigned char *buffer) {
-    int len = strlen(buffer);
-    unsigned char *tmp = malloc(len*sizeof(char));
-    for (int i = 0; i < len; i++) {
-        tmp[len-1-i] = buffer[i];
-    }
-    strncpy(buffer, tmp, len);
-    free(tmp);
-    return;
-}
-
-int create_and_write_file_data(FILE *fp, Detail *detail) {
-    bmp_file_header_t header;
-    bmp_file_info_t info;
-    unsigned char buffer_16[2] = {0};
-    unsigned char buffer_32[4] = {0};
-    int num = 0;
-
-    buffer_16[1] = 'B';
-    buffer_16[0] = 'M';
-    strncpy(header.type, buffer_16, 2);
     
-    fseek(fp, 0, SEEK_END);
-    num = ftell(fp);
-    sprintf(buffer_32, "%d", num);
-    buffer_reverse(buffer_32);
-    strncpy(header.size, buffer_32, 4);
-    
-    memset(header.reserved1, 0, 2);
-    memset(header.reserved2, 0, 2);
-    
-    if (detail->type == bit_1) {
-        num = 62;
-    } else if (detail->type == bit_24) {
-        num = 54;
-    }
-    sprintf(buffer_32, "%d", num);
-    buffer_reverse(buffer_32);
-    strncpy(header.off_bits, buffer_32, 4);
-    
-    num = 40;
-    sprintf(buffer_32, "%d", num);
-    buffer_reverse(buffer_32);
-    strncpy(header.size, buffer_32, 4);
-    
-    num = detail->width;
-    sprintf(buffer_32, "%d", num);
-    buffer_reverse(buffer_32);
-    strncpy(info.width, buffer_32, 4);
-    
-    num = detail->height;
-    sprintf(buffer_32, "%d", num);
-    buffer_reverse(buffer_32);
-    strncpy(info.height, buffer_32, 4);
-    
-    num = 1;
-    sprintf(buffer_16, "%d", num);
-    buffer_reverse(buffer_16);
-    strncpy(info.planes, buffer_16, 2);
-    
-    if (detail->type == bit_1) {
-        num = 1;
-    } else if (detail->type == bit_24) {
-        num = 24;
-    }
-    sprintf(buffer_16, "%d", num);
-    buffer_reverse(buffer_16);
-    strncpy(info.bit_count, buffer_16, 2);
-    
-    memset(info.compression, 0, 4);
-    
-    num = header.size - header.off_bits;
-    sprintf(buffer_32, "%d", num);
-    buffer_reverse(buffer_32);
-    strncpy(info.size_image, buffer_32, 4);
-    
-    num = 3780;
-    sprintf(buffer_32, "%d", num);
-    buffer_reverse(buffer_32);
-    strncpy(info.x_pels_permeter, buffer_32, 4);
-    
-    num = 3780;
-    sprintf(buffer_32, "%d", num);
-    buffer_reverse(buffer_32);
-    strncpy(info.y_pels_permeter, buffer_32, 4);
-
-    memset(info.clr_used, 0, 4);
-    memset(info.clr_important, 0, 4);
-
-    write_file_data(fp, header, info, detail);
+    detail->data = image_data;
+    return image_data;
 }
 
 void write_image_data(FILE *fp, Detail *detail) {
-    if (detail->type == bit_1) {
-        Pixel_1 *data = (Pixel_1*)detail->data;
-        fwrite(data, detail->width, 1, fp);
-    } else if (detail->type == bit_24) {
-        Pixel_24 *data = (Pixel_24*)detail->data;
-        fwrite(data, sizeof(*data), 1, fp);
-    }
-    return;
+    if (detail->data == NULL || detail->image_size == 0) return;
+    
+    fseek(fp, detail->image_offset, SEEK_SET);
+    
+    fwrite(detail->data, 1, detail->image_size, fp);
+    
+    fflush(fp);
 }
 
-int write_file_data(FILE *fp, bmp_file_header_t header, bmp_file_info_t info, Detail *detail) {
+int create_and_write_file_data(FILE *fp, Detail *detail) {
+
+    bmp_file_header_t header;
+    bmp_file_info_t info;
+
+    memset(&header, 0, sizeof(header));
+    memset(&info, 0, sizeof(info));
+
+    header.type = 0x4D42;
+    header.off_bits = (detail->type == bit_1) ? 62 : 54;
+    
+    info.size = 40;
+    info.width = detail->width;
+    info.height = detail->height;
+    info.planes = 1;
+    info.bit_count = (detail->type == bit_1) ? 1 : 24;
+    info.compression = 0;
+    info.size_image = detail->image_size;
+    info.x_pels_permeter = 3780;
+    info.y_pels_permeter = 3780;
+    info.clr_used = 0;
+    info.clr_important = 0;
+
+    header.size = header.off_bits + detail->image_size;
+    info.size_image = detail->image_size;
+
+    fseek(fp, 0, SEEK_SET);
     fwrite(&header, sizeof(header), 1, fp);
     fwrite(&info, sizeof(info), 1, fp);
-    unsigned char bit_1_palette[8] = {0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0};
+    
     if (detail->type == bit_1) {
-        fwrite(bit_1_palette, sizeof(bit_1_palette), 1, fp);
+        uint8_t palette[8] = {
+            0x00, 0x00, 0x00, 0x00,
+            0xFF, 0xFF, 0xFF, 0x00
+        };
+        fwrite(palette, sizeof(palette), 1, fp);
     }
+
     return OK;
 }
+

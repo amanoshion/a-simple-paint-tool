@@ -18,6 +18,10 @@
 #define XL 256
 #define XXL 512
 
+FILE* open_new(const char *path, const char *name);
+int analysis_command(const char *buffer, FILE *fp, Detail *detail, Detail *src_detail, _Bool *status);
+void ini_detail(Detail *detail);
+
 FILE* open_new(const char *path, const char *name) {
     DIR *dir = opendir(path);
     if (dir == NULL) return NULL;
@@ -35,16 +39,16 @@ FILE* open_new(const char *path, const char *name) {
     if (path[l-1] == '\n') {
         l--;
     }
-    strncpy(full_path, path, l);
-    strncpy(full_path + l, name, strlen(name));
+
+    snprintf(full_path, sizeof(full_path), "%s%s", path, name);
     
     FILE *fp = NULL;
     if (!isfound) {
         fp = fopen(full_path, "wb+");
-        printf("file not exist , created\n");
+        printf("file not exist, created\n");
     } else if (isfound) {
         fp = fopen(full_path, "rb+");
-        printf("file exist , load file\n");
+        printf("file exist, load file\n");
     }
     closedir(dir);
     return fp;
@@ -52,11 +56,11 @@ FILE* open_new(const char *path, const char *name) {
 
 int analysis_command(const char *buffer, FILE *fp, Detail *detail, Detail *src_detail, _Bool *status) {
     int argc = 0;
-    unsigned char path[S] = {0};
-    unsigned char buf_1[5] = {0};
-    unsigned char color[3] = {0};
-    int arg1, arg2, arg3, arg4 = 0;
-    argc = sscanf(buffer, "%s %s %d %d %d %d", buf_1, color, arg1, arg2, arg3, arg4);
+    char path[S] = {0};
+    char buf_1[5] = {0};
+    char color[3] = {0};
+    int arg1, arg2, arg3, arg4 arg5= 0;
+    argc = sscanf(buffer, "%s %s %d %d %d %d", buf_1, color, &arg1, &arg2, &arg3, &arg4, &arg5);
     if (argc < 1) return ERROR;
     if (strncmp(buf_1, "exit", 4) == 0 && strlen(buf_1) == 4) {
         (*status) = 0;
@@ -68,31 +72,38 @@ int analysis_command(const char *buffer, FILE *fp, Detail *detail, Detail *src_d
         clear(detail, fp);
     } else if (strncmp(buf_1, "point", 5) == 0 && strlen(buf_1) == 5) {
         if (argc < 4) return ERROR;
-        point(fp, detail, color, arg1, arg2);
+        point(fp, detail, color, arg1, arg2, arg3);
+        printf("point is write\n");
     } else if (strncmp(buf_1, "line", 4) == 0 && strlen(buf_1) == 4) {
         if (argc < 6) return ERROR;
-        line(fp, detail, color, arg1, arg2, arg3, arg4);
+        line(fp, detail, color, arg1, arg2, arg3, arg4, arg5);
+        printf("line is write\n");
     } else if (strncmp(buf_1, "rect", 4) == 0 && strlen(buf_1) == 4) {
         if (argc < 6) return ERROR;
-        rect(fp, detail, color, arg1, arg2, arg3, arg4);
+        rect(fp, detail, color, arg1, arg2, arg3, arg4, arg5);
+        printf("write is write\n");
     } else if (strncmp(buf_1, "circle", 6) == 0 && strlen(buf_1) == 6) {
         if (argc < 5) return ERROR;
-        circle(fp, detail, color, arg1, arg2, arg3);
+        circle(fp, detail, color, arg1, arg2, arg3, arg5);
+        printf("circle is write\n");
     } else if (strncmp(buf_1, "paste", 5) == 0 && strlen(buf_1) == 5) {
-        if (argc < 5) return ERROR;
+        if (argc < 4) return ERROR;
         printf("input path : \n");
         scanf("%s", path);
-        paste(fp, detail, src_detail, arg1, arg2, path);
+        paste(fp, detail, src_detail, arg1, arg2, arg3, path);
+        printf("file is paste\n");
     } else {
         return ERROR;
     }
     write_image_data(fp, detail);
+    return OK;
 }
 
 void ini_detail(Detail *detail) {
     detail->width = 0;
     detail->height = 0;
-    detail->padding = 0;
+    detail->padding_in_bits = 0;
+    detail->padding_in_bytes = 0;
     detail->type = undefined;
     detail->one_pixel_bit_size = 0;
     detail->image_size = 0;
@@ -100,9 +111,10 @@ void ini_detail(Detail *detail) {
     memset(detail->bg_color, 0, 3);
     detail->data = NULL;
 }
+
 int main(int argc, const char *argv[]) {
     if (argc < 7) {
-        printf("usage : <filePath> <fileName> <width> <height> <depth> <background color>\n");
+        printf("usage : <filePath> <fileName> <width> <height> <depth> <background color(0x b,g,r)>\n");
         return ERROR;
     }
 
@@ -120,21 +132,21 @@ int main(int argc, const char *argv[]) {
     detail->width = atoi(argv[3]);
     detail->height = atoi(argv[4]);
     strncpy(detail->bg_color, argv[6], 3);
-    Deep_Type type = -1;
-    if (strncmp(argv[6], "1", strlen(argv[6])) == 0) {
+
+    if (strncmp(argv[5], "1", 1) == 0) {
         detail->type = bit_1;
         detail->one_pixel_bit_size = 1;
         detail->image_offset = 62;
-    }else if (strncmp(argv[6], "24", strlen(argv[6])) == 0) {
+    }else if (strncmp(argv[5], "24", 2) == 0) {
         detail->type = bit_24;
         detail->one_pixel_bit_size = 24;
         detail->image_offset = 54;
-    } 
-    if (type == -1) return ERROR;
+    } else {
+        printf("depth support : [1] [24]\n");
+    }
 
-    int padding = ini_image_data(fp, detail);
-    detail->padding = padding;
-    detail->image_size = (detail->width + detail->padding)*detail->height;
+ 
+    ini_image_data(fp, detail);  // ini padding in detail
     
     detail->data = update_image_data(fp, detail, NULL, NULL);
     write_image_data(fp, detail);
@@ -145,9 +157,15 @@ int main(int argc, const char *argv[]) {
     _Bool isContinue = 1;
     while(isContinue) {
         memset(command_buffer, 0, M);
-        scanf("%s", command_buffer);
+        fgets(command_buffer, M, stdin);
         analysis_command(command_buffer, fp, detail, src_detail, &isContinue);
-        
-               
+    }
+    if (detail != NULL && detail->data != NULL) {
+        free(detail->data);
+        detail->data = NULL;
+    }
+    if (src_detail != NULL && src_detail->data != NULL) {
+        free(src_detail->data);
+        src_detail->data = NULL;
     }
 }

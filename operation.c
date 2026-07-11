@@ -11,36 +11,38 @@ _Bool check_pos(Detail *detail, int posX, int posY) {
         return 1;
     }
 }
-void point(FILE *fp, Detail *detail, unsigned char *color, int posX, int posY) {
-    if (check_pos(detail, posX, posY)) {
-        if (detail->type == bit_1) {
-            Pixel_1 *data1 = (Pixel_1*)detail->data;    // read
-            int bit_pos = 7 - (posX % 8);
-            data1[((detail->width + detail->padding) * (posY - 1))/8  + posX/8].bits ^= (1 << bit_pos);
-            detail->data = data1;                       // write
-        } else if (detail->type == bit_24) {
-            Pixel_24 *data2 = (Pixel_24*)detail->data;  // read
-            data2[((detail->width + detail->padding) * (posY - 1)) + posX].b = color[2];
-            data2[((detail->width + detail->padding) * (posY - 1)) + posX].g = color[1];
-            data2[((detail->width + detail->padding) * (posY - 1)) + posX].r = color[0];
-            detail->data = data2;                       // write
-        }
-    } else {
-        return;
+void point(FILE *fp, Detail *detail, char *color, int size, int posX, int posY) {
+    if (!check_pos(detail, posX, posY)) return;
+
+    if (detail->type == bit_1) {
+        uint8_t *data = (uint8_t*)detail->data;
+        uint32_t bit_offset = posY * (detail->width + detail->padding_in_bits) + posX;
+        uint32_t byte_off = bit_offset / 8;
+        uint32_t bit_off = bit_offset / 8;
+        uint32_t bit_in_byte = bit_offset % 8;
+        uint8_t bit_value = (color[0] || color[1] || color[2]) ? 1 : 0;
+
+        if (bit_value) data[byte_off] |= (0x80 >> bit_in_byte);
+        else data[byte_off] &= ~(0x80 >> bit_in_byte);
+    } else if (detail->type == bit_24) {
+        uint8_t *data = (uint8_t*)detail->data;
+        uint32_t bytes_per_row = detail->width * 3 + detail->padding_in_bytes;
+        uint32_t byte_off = posY * bytes_per_row + posX * 3;
+        data[byte_off] = color[2];
+        data[byte_off+1] = color[1];
+        data[byte_off+2] = color[0];
     }
 }
 
-void line(FILE *fp, Detail *detail, unsigned char *color, int pos1_X, int pos1_Y, int pos2_X, int pos2_Y) {
+void line(FILE *fp, Detail *detail, char *color, int size, int pos1_X, int pos1_Y, int pos2_X, int pos2_Y) {
 
     int sideY = abs(pos2_Y - pos1_Y);
     int sideX = abs(pos2_X - pos1_X);
     int num = 0;
-    char short_side = 0;
     int step_x, step_y;
 
     if (sideY > sideX) {
         num = sideX;
-        short_side = 'x';
         if (pos2_Y > pos1_Y) {
             step_y = sideY/(num - 1);
         } else if (pos2_Y < pos1_Y) {
@@ -51,14 +53,13 @@ void line(FILE *fp, Detail *detail, unsigned char *color, int pos1_X, int pos1_Y
 
         if (pos2_X > pos1_X) {
             step_x = 1;
-        } else if (pos2_X < pos2_X){
+        } else if (pos2_X < pos1_X){
             step_x = -1;
         } else {
             step_x = 0;
         }
     } else if (sideY <= sideX){
         num = sideY;
-        short_side = 'y';
         if (pos2_X > pos1_X) {
             step_x = sideX/(num - 1);
         } else if (pos2_X <= pos1_X){
@@ -69,7 +70,7 @@ void line(FILE *fp, Detail *detail, unsigned char *color, int pos1_X, int pos1_Y
 
         if (pos2_Y > pos1_Y) {
             step_y = 1;
-        } else if (pos2_Y < pos2_Y){
+        } else if (pos2_Y < pos1_Y){
             step_y = -1;
         } else {
             step_y = 0;
@@ -94,7 +95,7 @@ void line(FILE *fp, Detail *detail, unsigned char *color, int pos1_X, int pos1_Y
     return;
 } 
 
-void rect(FILE *fp, Detail *detail, unsigned char *color, int pos1_X, int pos1_Y, int pos2_X, int pos2_Y) {
+void rect(FILE *fp, Detail *detail, char *color, int size, int pos1_X, int pos1_Y, int pos2_X, int pos2_Y) {
 
     Pixel_Pos pos3;
     Pixel_Pos pos4;
@@ -107,64 +108,38 @@ void rect(FILE *fp, Detail *detail, unsigned char *color, int pos1_X, int pos1_Y
     line(fp, detail, color, pos1_X, pos1_Y, pos3.posX, pos3.posY);
     line(fp, detail, color, pos1_X, pos1_Y, pos4.posX, pos4.posY);
     line(fp, detail, color, pos2_X, pos2_Y, pos3.posX, pos3.posY);
-    line(fp, detail, color, pos2_X, pos2_Y, pos3.posX, pos3.posY);
+    line(fp, detail, color, pos2_X, pos2_Y, pos4.posX, pos4.posY);
 }
 
-void circle(FILE *fp, Detail *detail, unsigned char *color, int radius, int pos_X, int pos_Y) {
+void circle(FILE *fp, Detail *detail, char *color, int size, int radius, int pos_X, int pos_Y) {
     for (int i = pos_X - radius; i < pos_X + radius; i++) {
         for (int j = pos_Y - radius; j < pos_Y + radius; j++) {
-            if (sqrt((i-pos_X)*(i-pos_X) + (j-pos_Y)*(j-pos_Y)) >= radius-1 || 
+            if (sqrt((i-pos_X)*(i-pos_X) + (j-pos_Y)*(j-pos_Y)) >= radius-1 && 
             sqrt((i-pos_X)*(i-pos_X) + (j-pos_Y)*(j-pos_Y)) <= radius+1) {
-                point(fp, detail, color, pos_X, pos_Y);
+                point(fp, detail, color, i, j);
             }
         }
     }
     return;
 }
 
-int get_bmp_data(FILE *fp, Detail *src_detail) {
-    unsigned char buffer[4] = {0};
-    fseek(fp, 10*sizeof(uint8_t), SEEK_SET);
-    memset(buffer, 0, 4);
-    fread(buffer, 1, 4, fp);
-    buffer_reverse(buffer);
-    sscanf(buffer, "%d", src_detail->image_offset);
-    
-    fseek(fp, 18*sizeof(uint8_t), SEEK_SET);
-    memset(buffer, 0, 4);
-    fread(buffer, 1, 4, fp);
-    buffer_reverse(buffer);
-    sscanf(buffer, "%d", src_detail->width);
-    
-    fseek(fp, 22*sizeof(uint8_t), SEEK_SET);
-    memset(buffer, 0, 4);
-    fread(buffer, 1, 4, fp);
-    buffer_reverse(buffer);
-    sscanf(buffer, "%d", src_detail->height);
-    
-    fseek(fp, 28*sizeof(uint8_t), SEEK_SET);
-    memset(buffer, 0, 4);
-    fread(buffer, 1, 2, fp);
-    buffer_reverse(buffer);
-    sscanf(buffer, "%d", src_detail->one_pixel_bit_size);
-    
-    if (src_detail->one_pixel_bit_size == 1) {
-        src_detail->type = bit_1;
-    } else if (src_detail->one_pixel_bit_size == 24) {
-        src_detail->type = bit_24;
-    } else {
-        return ERROR;
-    }
-    
-    fseek(fp, 34*sizeof(uint8_t), SEEK_SET);
-    memset(buffer, 0, 4);
-    fread(buffer, 1, 4, fp);
-    buffer_reverse(buffer);
-    sscanf(buffer, "%d", src_detail->image_size);
+int get_bmp_data(FILE *fp_src, Detail *src_detail) {
+    bmp_file_header_t header;
+    bmp_file_info_t info;
+    fread(&header, sizeof(header), 1, fp_src);
+    fread(&info, sizeof(info), 1, fp_src);
 
-    src_detail->padding = (src_detail->image_size - src_detail->height*src_detail->width)/src_detail->height;
-    
+    src_detail->width = info.width;
+    src_detail->height = info.height;
 
+    src_detail->type = (info.bit_count == 1) ? bit_1 : bit_24;
+    src_detail->one_pixel_bit_size = info.bit_count;
+    src_detail->image_size = info.size_image;
+    src_detail->image_offset = header.off_bits;
+    
+    ini_image_data(fp_src, src_detail);
+    
+    return OK;
 }
 void paste(FILE *fp_targ, Detail *detail, Detail *src_detail, int pos_X, int pos_Y, char *path) {
     FILE *fp_src = fopen(path, "r");
@@ -181,7 +156,13 @@ void paste(FILE *fp_targ, Detail *detail, Detail *src_detail, int pos_X, int pos
 void show(Detail *detail) {
     printf("width : %d\n", detail->width);
     printf("height : %d\n", detail->height);
-    printf("padding : %d\n", detail->padding);
+    if (detail->type == bit_1) {
+        printf("padding : %d bits\n", detail->padding_in_bits);
+    } else if (detail->type == bit_24) {
+        printf("padding : %d bytes\n", detail->padding_in_bytes);
+    } else {
+        printf("error : lost padding\n");
+    }
     printf("type : %d(0 : bit_1, 1 : bit_24)\n", detail->type);
     printf("one_pixel_bit_size : %d\n", detail->one_pixel_bit_size);
     printf("image_size : %d\n", detail->image_size);
@@ -190,7 +171,7 @@ void show(Detail *detail) {
 }
 void help() {
     printf("========================================\n");
-    printf("=\tpaint command\n");
+    printf("\t[paint tool command]\n");
     printf("================basic===================\n");
     printf("exit\n");
     printf("help\n");
@@ -201,7 +182,7 @@ void help() {
     printf("line + <color> <pixelX_start> <pixelY_start> <pixelX_end> <pixelY_end>\n");
     printf("rect + <color> <pixelX_start> <pixelY_start> <pixelX_end> <pixelY_end>\n");
     printf("circle + <color> <pixelX> <pixelY> <radius>\n");
-    printf("paste + <path> <pixelX> <pixelY> \n");
+    printf("paste + <pixelX> <pixelY> \n");
     printf("========================================\n");
 
 }
