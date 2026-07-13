@@ -10,12 +10,13 @@ typedef struct Pixel_Pos {
 } Pixel_Pos;
 
 _Bool check_pos(Detail *detail, int posX, int posY);
-void point(FILE *fp, Detail *detail, char *color, int size, int posX, int posY);
-void line(FILE *fp, Detail *detail, char *color, int size, int pos1_X, int pos1_Y, int pos2_X, int pos2_Y);
-void rect(FILE *fp, Detail *detail, char *color, int size, int pos1_X, int pos1_Y, int pos2_X, int pos2_Y);
-void circle(FILE *fp, Detail *detail, char *color, int size, int radius, int pos_X, int pos_Y);
+void draw_one_pixel(FILE *fp, Detail *detail, uint8_t *color, int posX, int posY);
+void point(FILE *fp, Detail *detail, uint8_t *color, int size, int posX, int posY);
+void line(FILE *fp, Detail *detail, uint8_t *color, int size, int pos1_X, int pos1_Y, int pos2_X, int pos2_Y);
+void rect(FILE *fp, Detail *detail, uint8_t *color, int size, int pos1_X, int pos1_Y, int pos2_X, int pos2_Y);
+void circle(FILE *fp, Detail *detail, uint8_t *color, int size, int pos_X, int pos_Y, int radius);
 int get_bmp_data(FILE *fp, Detail *src_detail);
-void paste(FILE *fp_targ, Detail *detail, Detail *src_detail, int pos_X, int pos_Y, char *path);
+void paste(FILE *fp_targ, Detail *detail, FILE *fp_src, Detail *src_detail, int pos_X, int pos_Y);
 
 void show(Detail *detail);
 void help();

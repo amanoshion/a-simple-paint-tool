@@ -31,7 +31,7 @@ typedef struct Detail {
     int one_pixel_bit_size;
     int image_size; // bytes num    // TODO : fix image_size to bytes , not pixel num
     int image_offset;
-    char bg_color[3];
+    uint8_t bg_color[3];
     void *data;
 } Detail;
 
@@ -62,10 +62,11 @@ typedef struct {
 } bmp_file_info_t;    //size : 40 byte
 #pragma pack(pop)
 
+void arg_fix(int *y, Detail *detail);
 void ini_image_data(FILE *fp, Detail *detail);
-void get_a_pixel_color(char *dst_color, Detail *src_detail, FILE *fp_src, int pixel_offset);
+void get_a_pixel_color(uint8_t *dst_color, Detail *src_detail, FILE *fp_src, int pixel_offset);
 
-void *update_image_data(FILE *fp, Detail *detail, Detail *src_detail, FILE *fp_src);
+void* update_image_data(FILE *fp, Detail *detail, FILE *fp_src, Detail *src_detail);
 void write_image_data(FILE *fp, Detail *detail);
 
 int create_and_write_file_data(FILE *fp, Detail *detail);

@@ -4,6 +4,10 @@
 #include "format.h"
 
 
+void arg_fix(int *y, Detail *detail) {
+    (*y) = detail->height - (*y);
+    return;
+}
 
 void ini_image_data(FILE *fp, Detail *detail) {
     switch(detail->type) {
@@ -25,7 +29,7 @@ void ini_image_data(FILE *fp, Detail *detail) {
     }
 }
 
-void get_a_pixel_color(char *dst_color, Detail *src_detail, FILE *fp_src, int pixel_offset) { 
+void get_a_pixel_color(uint8_t *dst_color, Detail *src_detail, FILE *fp_src, int pixel_offset) { 
     
     if (pixel_offset < 0 || pixel_offset >= src_detail->width *src_detail->height) {
         dst_color[0] = 0;
@@ -74,12 +78,12 @@ void get_a_pixel_color(char *dst_color, Detail *src_detail, FILE *fp_src, int pi
             long old_pos = ftell(fp_src);
 
             fseek(fp_src, src_detail->image_offset + actual_offset, SEEK_SET);
-            uint8_t bgr[3];
-            fread(bgr, 3, 1, fp_src);
+            uint8_t rgb[3];
+            fread(rgb, 3, 1, fp_src);
 
-            dst_color[0] = bgr[2];
-            dst_color[1] = bgr[1];
-            dst_color[2] = bgr[0];
+            dst_color[0] = rgb[0];
+            dst_color[1] = rgb[1];
+            dst_color[2] = rgb[2];
 
             fseek(fp_src, old_pos, SEEK_SET);
             break;
@@ -93,7 +97,7 @@ void get_a_pixel_color(char *dst_color, Detail *src_detail, FILE *fp_src, int pi
     }
 }
 
-void* update_image_data(FILE *fp, Detail *detail, Detail *src_detail, FILE *fp_src) {
+void* update_image_data(FILE *fp, Detail *detail, FILE *fp_src, Detail *src_detail) {
     if (detail->data != NULL) {
         free(detail->data);
         detail->data = NULL;
@@ -111,43 +115,42 @@ void* update_image_data(FILE *fp, Detail *detail, Detail *src_detail, FILE *fp_s
         bytes_per_row = detail->width * 3 + detail->padding_in_bytes;
     }
     
-    int pixel_index = 0;
-    for (uint32_t y = 0; y < detail->height; y++) {
-        for (uint32_t x = 0; x < detail->width; x++) {
+    for (int y = 0; y < detail->height; y++) {
+        for (int x = 0; x < detail->width; x++) {
             uint8_t color[3] = {0};
-
             if (src_detail == NULL || fp_src == NULL) {
                 memcpy(color, detail->bg_color, 3);
             } else {
-                int src_pixel_index = pixel_index;
+            // 24
+                int src_pixel_index = 0;
                 if (src_detail->width != detail->width || src_detail->height != detail->height) {
                     int src_x = x % src_detail->width;
                     int src_y = y % src_detail->height;
-                    src_pixel_index = src_y * src_detail->width + src_x;
+                    src_pixel_index = src_y  * src_detail->width + src_x;
                 }
+            // get color of 24 and 1
                 get_a_pixel_color(color, src_detail, fp_src, src_pixel_index);
             }
-            
+            // 1
             if (detail->type == bit_1) {
-                uint32_t bit_pos = y * (detail->width + detail->padding_in_bits) + x;
+                uint32_t bit_pos = y * (detail->width + detail->padding_in_bits) + x ;
                 uint32_t byte_off = bit_pos / 8;
                 uint32_t bit_in_byte = bit_pos % 8;
                 
                 uint8_t bit_value = (color[0] || color[1] || color[2]) ? 1 : 0;
                 
-                if (bit_value) {
+                if (bit_value) {            // 1000 0000
                     image_data[byte_off] |= (0x80 >> bit_in_byte);
                 } else {
                     image_data[byte_off] &= ~(0x80 >> bit_in_byte);
                 }
+            // 24
             } else { 
                 uint32_t byte_off = y * bytes_per_row + x * 3;
                 image_data[byte_off] = color[2];     // B
                 image_data[byte_off + 1] = color[1];  // G
                 image_data[byte_off + 2] = color[0];  // R
             }
-            
-            pixel_index++;
         }
     }
     
@@ -155,14 +158,27 @@ void* update_image_data(FILE *fp, Detail *detail, Detail *src_detail, FILE *fp_s
     return image_data;
 }
 
-void write_image_data(FILE *fp, Detail *detail) {
+void write_image_data(FILE *fp, Detail *detail, int x, int y, Detail *src_detail) {
     if (detail->data == NULL || detail->image_size == 0) return;
     
-    fseek(fp, detail->image_offset, SEEK_SET);
-    
-    fwrite(detail->data, 1, detail->image_size, fp);
-    
-    fflush(fp);
+    if (src_detail == NULL) {
+        fseek(fp, detail->image_offset, SEEK_SET);
+        
+        fwrite(detail->data, 1, detail->image_size, fp);
+        
+        fflush(fp);
+    } else {
+        uint32_t bytes_per_row;
+        if (detail->type == bit_1) {
+            bytes_per_row = (detail->width + detail->padding_in_bits) / 8;
+        } else { // bit_24
+            bytes_per_row = detail->width * 3 + detail->padding_in_bytes;
+        }        // bit_1
+        if (detail->type == bit_1) {
+                int bit_pos = y * (detail->width + detail->padding_in_bits) + x ;
+        } else if (detail->type == bit_24) {
+                
+        }
 }
 
 int create_and_write_file_data(FILE *fp, Detail *detail) {

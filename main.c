@@ -18,11 +18,12 @@
 #define XL 256
 #define XXL 512
 
-FILE* open_new(const char *path, const char *name);
+FILE* open_new(_Bool *flag, const char *path, const char *name);
 int analysis_command(const char *buffer, FILE *fp, Detail *detail, Detail *src_detail, _Bool *status);
 void ini_detail(Detail *detail);
+void rgbstring_to_bgruint8(char *str, uint8_t *bgr);
 
-FILE* open_new(const char *path, const char *name) {
+FILE* open_new(_Bool *flag, const char *path, const char *name) {
     DIR *dir = opendir(path);
     if (dir == NULL) return NULL;
     struct dirent *entry = NULL;
@@ -45,9 +46,11 @@ FILE* open_new(const char *path, const char *name) {
     FILE *fp = NULL;
     if (!isfound) {
         fp = fopen(full_path, "wb+");
+        (*flag) = 0;
         printf("file not exist, created\n");
     } else if (isfound) {
         fp = fopen(full_path, "rb+");
+        (*flag) = 1;
         printf("file exist, load file\n");
     }
     closedir(dir);
@@ -56,46 +59,86 @@ FILE* open_new(const char *path, const char *name) {
 
 int analysis_command(const char *buffer, FILE *fp, Detail *detail, Detail *src_detail, _Bool *status) {
     int argc = 0;
-    char path[S] = {0};
-    char buf_1[5] = {0};
-    char color[3] = {0};
-    int arg1, arg2, arg3, arg4 arg5= 0;
-    argc = sscanf(buffer, "%s %s %d %d %d %d", buf_1, color, &arg1, &arg2, &arg3, &arg4, &arg5);
+    char buf_1[S] = {0};
+    uint8_t color[3] = {0};
+    char tmp[S] = {0};
+    int arg1, arg2, arg3, arg4, arg5 = 0;
+    
+    argc = sscanf(buffer, "%s %s %d %d %d %d %d", buf_1, tmp, &arg1, &arg2, &arg3, &arg4, &arg5);
     if (argc < 1) return ERROR;
+    if (argc >= 2) {
+        if (strcmp(tmp, "red") == 0) {
+            color[0] = 0xFF;
+            color[1] = 0x00;
+            color[2] = 0x40;
+        } else if (strcmp(tmp, "green") == 0) {
+            color[0] = 0x00;
+            color[1] = 0xFF;
+            color[2] = 0x6F;
+            
+        } else if (strcmp(tmp, "blue") == 0) {
+            color[0] = 0x00;
+            color[1] = 0x88;
+            color[2] = 0xFF;
+        } else {
+            rgbstring_to_bgruint8(tmp, color);
+        }
+    }
     if (strncmp(buf_1, "exit", 4) == 0 && strlen(buf_1) == 4) {
         (*status) = 0;
+        return OK;
     } else if (strncmp(buf_1, "help", 4) == 0 && strlen(buf_1) == 4) {
         help();
+        return OK;
     } else if (strncmp(buf_1, "show", 4) == 0 && strlen(buf_1) == 4) {
         show(detail);
+        return OK;
     } else if (strncmp(buf_1, "clear", 5) == 0 && strlen(buf_1) == 5) {
         clear(detail, fp);
     } else if (strncmp(buf_1, "point", 5) == 0 && strlen(buf_1) == 5) {
         if (argc < 4) return ERROR;
+        arg_fix(&arg3, detail);
         point(fp, detail, color, arg1, arg2, arg3);
-        printf("point is write\n");
     } else if (strncmp(buf_1, "line", 4) == 0 && strlen(buf_1) == 4) {
         if (argc < 6) return ERROR;
+        arg_fix(&arg3, detail);
+        arg_fix(&arg5, detail);
         line(fp, detail, color, arg1, arg2, arg3, arg4, arg5);
-        printf("line is write\n");
     } else if (strncmp(buf_1, "rect", 4) == 0 && strlen(buf_1) == 4) {
         if (argc < 6) return ERROR;
+        arg_fix(&arg3, detail);
+        arg_fix(&arg5, detail);
         rect(fp, detail, color, arg1, arg2, arg3, arg4, arg5);
-        printf("write is write\n");
     } else if (strncmp(buf_1, "circle", 6) == 0 && strlen(buf_1) == 6) {
         if (argc < 5) return ERROR;
-        circle(fp, detail, color, arg1, arg2, arg3, arg5);
-        printf("circle is write\n");
+        arg_fix(&arg3, detail);
+        circle(fp, detail, color, arg1, arg2, arg3, arg4);
     } else if (strncmp(buf_1, "paste", 5) == 0 && strlen(buf_1) == 5) {
-        if (argc < 4) return ERROR;
+        if (argc < 1) return ERROR;
+        char path[S] = {0};
+        char name[S] = {0};
+        _Bool isexist;
+        int x, y;
         printf("input path : \n");
         scanf("%s", path);
-        paste(fp, detail, src_detail, arg1, arg2, arg3, path);
-        printf("file is paste\n");
+        printf("input file name : \n");
+        scanf("%s", name);
+        printf("input start x :");
+        scanf("%d", &x);
+        printf("input start y :");
+        scanf("%d", &y);
+        
+        arg_fix(&y, detail);
+        FILE *fp_src = open_new(&isexist, path, name);
+        if (fp_src == NULL) return ERROR;
+        paste(fp, detail, fp_src, src_detail, x, y);
     } else {
+        printf("cannot analysis\n");
         return ERROR;
     }
+    printf("========================================\n");
     write_image_data(fp, detail);
+    printf("file is updated\n");
     return OK;
 }
 
@@ -112,13 +155,34 @@ void ini_detail(Detail *detail) {
     detail->data = NULL;
 }
 
+void rgbstring_to_bgruint8(char *str, uint8_t *bgr) {
+    int len = strlen(str);
+    if (len < 6) return;
+    char str_fix[6] = {0};
+    if ((str[len - 1]) == '0' && (str[len - 2]) == 'x' && len == 8) {
+        strncpy(str_fix, str + 2, 6);
+    } else {
+        strncpy(str_fix, str, 6);
+    }
+    unsigned int tmp;
+    sscanf(str_fix, "%x", &tmp);  // B
+    
+    bgr[0] = 0;
+    bgr[1] = 0;
+    bgr[2] = 0;
+    bgr[0] |= tmp & 0xFF;
+    bgr[1] |= tmp>>8 & 0xFF;
+    bgr[2] |= tmp>>16 & 0xFF;
+}
+
 int main(int argc, const char *argv[]) {
     if (argc < 7) {
-        printf("usage : <filePath> <fileName> <width> <height> <depth> <background color(0x b,g,r)>\n");
+        printf("usage : <filePath> <fileName> <width> <height> <depth> <background color [red|green|blue|yellow]>\n");
         return ERROR;
     }
 
-    FILE *fp = open_new(argv[1], argv[2]);
+    _Bool file_exist = 0;
+    FILE *fp = open_new(&file_exist, argv[1], argv[2]);
     if (fp == NULL) return ERROR;
 
     Detail file_detail;
@@ -129,28 +193,36 @@ int main(int argc, const char *argv[]) {
     ini_detail(detail);
     ini_detail(src_detail);
 
-    detail->width = atoi(argv[3]);
-    detail->height = atoi(argv[4]);
-    strncpy(detail->bg_color, argv[6], 3);
+    if (!file_exist) {
+        detail->width = atoi(argv[3]);
+        detail->height = atoi(argv[4]);
+        if (strncmp(argv[5], "1", 1) == 0) {
+            detail->type = bit_1;
+            detail->one_pixel_bit_size = 1;
+            detail->image_offset = 62;
+        } else if (strncmp(argv[5], "24", 2) == 0) {
+            detail->type = bit_24;
+            detail->one_pixel_bit_size = 24;
+            detail->image_offset = 54;
+        } else {
+            printf("depth support : [1] [24]\n");
+        }
+        char tmp[S] = {0};
+        memcpy(tmp, argv[6], strlen(argv[6]));
+        rgbstring_to_bgruint8(tmp, detail->bg_color);
 
-    if (strncmp(argv[5], "1", 1) == 0) {
-        detail->type = bit_1;
-        detail->one_pixel_bit_size = 1;
-        detail->image_offset = 62;
-    }else if (strncmp(argv[5], "24", 2) == 0) {
-        detail->type = bit_24;
-        detail->one_pixel_bit_size = 24;
-        detail->image_offset = 54;
+        ini_image_data(fp, detail);  // ini padding in detail
+        detail->data = update_image_data(fp, detail, NULL, NULL, 0, 0);
+        create_and_write_file_data(fp, detail);
+        write_image_data(fp, detail);
     } else {
-        printf("depth support : [1] [24]\n");
+        get_bmp_data(fp, detail);
+        char tmp[S] = {0};
+        memcpy(tmp, argv[6], strlen(argv[6]));
+        rgbstring_to_bgruint8(tmp, detail->bg_color);
     }
-
- 
-    ini_image_data(fp, detail);  // ini padding in detail
     
-    detail->data = update_image_data(fp, detail, NULL, NULL);
-    write_image_data(fp, detail);
-    create_and_write_file_data(fp, detail);
+
 
     help();
     char command_buffer[M] = {0};
@@ -168,4 +240,5 @@ int main(int argc, const char *argv[]) {
         free(src_detail->data);
         src_detail->data = NULL;
     }
+    return 0;
 }
