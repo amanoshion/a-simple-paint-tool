@@ -4,31 +4,43 @@
 #include <string.h>
 #include "format.h"
 #include "operation.h"
+
 _Bool check_pos(Detail *detail, int posX, int posY) {
-    if (!(posX >= 0 && posX < detail->width && posY >= 0 && posY < detail->height)) {
-        return 0;
+    if (posX >= 0 && posX < detail->width && posY >= 0 && posY < detail->height) {
+        return OK;
     } else {
-        return 1;
+        printf("pos out of screen x : %d y : %d\n", posX, posY);
+        return 0;
     }
 }
-void draw_one_pixel(FILE *fp, Detail *detail, uint8_t *color, int posX, int posY) {
-    if (!check_pos(detail, posX, posY)) return;
 
+void draw_one_pixel(FILE *fp, Detail *detail, uint8_t *color, int posX, int posY) {
+    if (detail == NULL || fp == NULL) return;
+    if (check_pos(detail, posX, posY) == 0) return;
+    if (color == NULL || detail->data == NULL) return;
     if (detail->type == bit_1) {
         uint8_t *data = (uint8_t*)detail->data;
         uint32_t bit_offset = posY * (detail->width + detail->padding_in_bits) + posX;
         uint32_t byte_off = bit_offset / 8;
         uint32_t bit_in_byte = bit_offset % 8;
         uint8_t bit_value = (color[0] || color[1] || color[2]) ? 1 : 0;
-        if (bit_value) data[byte_off] |= (0x80 >> bit_in_byte);
-        else data[byte_off] &= ~(0x80 >> bit_in_byte);
+        if (bit_value) {
+            data[byte_off] |= (0x80 >> bit_in_byte);
+        } else {
+            data[byte_off] &= ~(0x80 >> bit_in_byte);
+        }
+        
     } else if (detail->type == bit_24) {
-        uint8_t *data = (uint8_t*)detail->data;
+        uint8_t *data = (uint8_t *)detail->data;
         uint32_t bytes_per_row = detail->width * 3 + detail->padding_in_bytes;
         uint32_t byte_off = posY * bytes_per_row + posX * 3;
-        data[byte_off] = color[2];      // B
+
+        data[byte_off] = color[2];      // B        // TODO : FIX
         data[byte_off+1] = color[1];    // G
         data[byte_off+2] = color[0];    // R
+
+    } else if (detail->type == undefined) {
+        printf("type undefined\n");
     }
     return;
 }
@@ -37,12 +49,12 @@ void point(FILE *fp, Detail *detail, uint8_t *color, int size, int posX, int pos
     if (size < 1) return;
 
     int x1 = posX - (size - 1);
-    int y1 = posY - (size - 1);
     int x2 = posX + (size - 1);
+    int y1 = posY - (size - 1);
     int y2 = posY + (size - 1);
     int dx, dy;
-    for(int i = x1; i < x2; i++) {
-        for(int j = y1; j < y2; j++) {
+    for(int i = x1; i <= x2; i++) {
+        for(int j = y1; j <= y2; j++) {
             dx = abs(i - posX);
             dy = abs(j - posY);
             if (sqrt(dx*dx + dy*dy) <= size) {
@@ -50,26 +62,23 @@ void point(FILE *fp, Detail *detail, uint8_t *color, int size, int posX, int pos
             }
         }
     }
+    write_image_data(fp, detail);
     return;
 }
 
 void line(FILE *fp, Detail *detail, uint8_t *color, int size, int pos1_X, int pos1_Y, int pos2_X, int pos2_Y) {
-
     int sideY = abs(pos2_Y - pos1_Y);
     int sideX = abs(pos2_X - pos1_X);
     int num = 0;
     int step_x, step_y;
 
     if (sideY > sideX) {
-        num = sideX;
-        if (num <= 1) {
-            point(fp, detail, color, size, pos1_X, pos1_Y);
-            point(fp, detail, color, size, pos2_X, pos2_Y);
-        }
+        num = sideX;        
+        if (num <= 1) num = sideY;
         if (pos2_Y > pos1_Y) {
-            step_y = sideY/(num - 1);
+            step_y = ceil(sideY / num); // avoid step_x/step_y be 0
         } else if (pos2_Y < pos1_Y) {
-            step_y = -sideY/(num - 1);
+            step_y = floor(-sideY / num);
         } else {
             step_y = 0;
         }
@@ -83,14 +92,11 @@ void line(FILE *fp, Detail *detail, uint8_t *color, int size, int pos1_X, int po
         }
     } else if (sideY <= sideX){
         num = sideY;
-        if (num <= 1) {
-            point(fp, detail, color, size, pos1_X, pos1_Y);
-            point(fp, detail, color, size, pos2_X, pos2_Y);
-        }
+        if (num <= 1) num = sideX;
         if (pos2_X > pos1_X) {
-            step_x = sideX/(num - 1);
-        } else if (pos2_X <= pos1_X){
-            step_x = -sideX/(num - 1);
+            step_x = ceil(sideX / num);       
+        } else if (pos2_X < pos1_X){
+            step_x = floor(-sideX / num); 
         } else {
             step_x = 0;
         }
@@ -104,19 +110,21 @@ void line(FILE *fp, Detail *detail, uint8_t *color, int size, int pos1_X, int po
         }
         
     }
-    Pixel_Pos *array = malloc((num + 1)*sizeof(Pixel_Pos));
 
-    array[0].posX = pos1_X;
-    array[0].posY = pos1_Y;
-    for (int i = 1; i < num; i++) {
-        array[i].posX = array[i-1].posX + step_x;
-        array[i].posY = array[i-1].posY + step_y;
-    }
-    array[num].posX = pos2_X;
-    array[num].posY = pos2_Y;
-    
-    for (int i = 0; i <= num; i++) {
+    Pixel_Pos *array = malloc(num * sizeof(Pixel_Pos));
+
+    for (int i = 0; i < num; i++) {
+        array[0].posX = pos1_X;
+        array[0].posY = pos1_Y;
+        for (int i = 1; i < num; i++) {
+            array[i].posX = array[i-1].posX + step_x;
+            array[i].posY = array[i-1].posY + step_y;
+        }
+        // array[num - 1].posX = pos2_X;
+        // array[num - 1].posY = pos2_Y;
+        
         point(fp, detail, color, size, array[i].posX, array[i].posY);
+        // printf("i: %d, x: %d y: %d\n", i, array[i].posX, array[i].posY);
     }
     free(array);
     return;
@@ -141,7 +149,7 @@ void rect(FILE *fp, Detail *detail, uint8_t *color, int size, int pos1_X, int po
 }
 
 void circle(FILE *fp, Detail *detail, uint8_t *color, int size, int pos_X, int pos_Y,  int radius) {
-    for (int i = pos_X - radius; i < pos_X + radius; i++) {
+    for (int i = pos_X - radius; i <= pos_X + radius; i++) {
         for (int j = pos_Y - radius; j < pos_Y + radius; j++) {
             if (sqrt((i-pos_X)*(i-pos_X) + (j-pos_Y)*(j-pos_Y)) >= radius-1 && 
             sqrt((i-pos_X)*(i-pos_X) + (j-pos_Y)*(j-pos_Y)) <= radius) {
@@ -152,30 +160,14 @@ void circle(FILE *fp, Detail *detail, uint8_t *color, int size, int pos_X, int p
     return;
 }
 
-int get_bmp_data(FILE *fp_src, Detail *src_detail) {
-    bmp_file_header_t header;
-    bmp_file_info_t info;
-    fread(&header, sizeof(header), 1, fp_src);
-    fread(&info, sizeof(info), 1, fp_src);
-    src_detail->width = info.width;
-    src_detail->height = info.height;
 
-    src_detail->type = (info.bit_count == 1) ? bit_1 : bit_24;
-    src_detail->one_pixel_bit_size = info.bit_count;
-    src_detail->image_size = info.size_image;
-    src_detail->image_offset = header.off_bits;
-    
-    ini_image_data(fp_src, src_detail);
-    
-    return OK;
-}
 void paste(FILE *fp, Detail *detail, FILE *fp_src, Detail *src_detail, int pos_X, int pos_Y) {
     if (fp_src == NULL) return;
     get_bmp_data(fp_src, src_detail);
 
-    detail->data = update_image_data(fp, detail, fp_src, src_detail);
+    update_image_data(fp, detail, fp_src, src_detail, pos_X, pos_Y);
 
-    write_image_data(fp, detail, pos_X, pos_Y);
+    write_image_data(fp, detail);
 }
 
 
@@ -214,6 +206,6 @@ void help() {
 }
 
 void clear(Detail *detail, FILE *fp) {
-    detail->data = update_image_data(fp, detail, NULL, NULL, 0, 0);
+    update_image_data(fp, detail, NULL, NULL, 0, 0);
     write_image_data(fp, detail);
 }

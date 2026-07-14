@@ -12,15 +12,15 @@ typedef enum {
     undefined
 } Deep_Type;
 
-typedef struct {
-    uint32_t bits;   
-} Pixel_1;
+// typedef struct {
+//     uint32_t bits;   
+// } Pixel_1;  // 1 byte
 
-typedef struct {
-    uint8_t b;
-    uint8_t g;
-    uint8_t r;
-} Pixel_24;
+// typedef struct {
+//     uint8_t b;
+//     uint8_t g;
+//     uint8_t r;
+// } Pixel_24; // 3 byte
 
 typedef struct Detail {
     uint32_t width;  //pixel num
@@ -29,7 +29,7 @@ typedef struct Detail {
     int padding_in_bytes;
     Deep_Type type;
     int one_pixel_bit_size;
-    int image_size; // bytes num    // TODO : fix image_size to bytes , not pixel num
+    int image_size; // bytes num   
     int image_offset;
     uint8_t bg_color[3];
     void *data;
@@ -64,9 +64,10 @@ typedef struct {
 
 void arg_fix(int *y, Detail *detail);
 void ini_image_data(FILE *fp, Detail *detail);
+int get_bmp_data(FILE *fp, Detail *src_detail);
 void get_a_pixel_color(uint8_t *dst_color, Detail *src_detail, FILE *fp_src, int pixel_offset);
 
-void* update_image_data(FILE *fp, Detail *detail, FILE *fp_src, Detail *src_detail);
+void update_image_data(FILE *fp, Detail *detail, FILE *fp_src, Detail *src_detail, int paste_offset_x, int paste_offset_y);
 void write_image_data(FILE *fp, Detail *detail);
 
 int create_and_write_file_data(FILE *fp, Detail *detail);

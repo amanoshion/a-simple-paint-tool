@@ -21,7 +21,7 @@
 FILE* open_new(_Bool *flag, const char *path, const char *name);
 int analysis_command(const char *buffer, FILE *fp, Detail *detail, Detail *src_detail, _Bool *status);
 void ini_detail(Detail *detail);
-void rgbstring_to_bgruint8(char *str, uint8_t *bgr);
+int rgbstring_to_bgruint8(char *str, uint8_t *bgr);
 
 FILE* open_new(_Bool *flag, const char *path, const char *name) {
     DIR *dir = opendir(path);
@@ -61,27 +61,27 @@ int analysis_command(const char *buffer, FILE *fp, Detail *detail, Detail *src_d
     int argc = 0;
     char buf_1[S] = {0};
     uint8_t color[3] = {0};
-    char tmp[S] = {0};
+    char tmp_color[S] = {0};
     int arg1, arg2, arg3, arg4, arg5 = 0;
     
-    argc = sscanf(buffer, "%s %s %d %d %d %d %d", buf_1, tmp, &arg1, &arg2, &arg3, &arg4, &arg5);
+    argc = sscanf(buffer, "%s %s %d %d %d %d %d", buf_1, tmp_color, &arg1, &arg2, &arg3, &arg4, &arg5);
     if (argc < 1) return ERROR;
     if (argc >= 2) {
-        if (strcmp(tmp, "red") == 0) {
+        if (strcmp(tmp_color, "red") == 0) {
             color[0] = 0xFF;
             color[1] = 0x00;
             color[2] = 0x40;
-        } else if (strcmp(tmp, "green") == 0) {
+        } else if (strcmp(tmp_color, "green") == 0) {
             color[0] = 0x00;
             color[1] = 0xFF;
             color[2] = 0x6F;
             
-        } else if (strcmp(tmp, "blue") == 0) {
+        } else if (strcmp(tmp_color, "blue") == 0) {
             color[0] = 0x00;
             color[1] = 0x88;
             color[2] = 0xFF;
         } else {
-            rgbstring_to_bgruint8(tmp, color);
+            rgbstring_to_bgruint8(tmp_color, color);
         }
     }
     if (strncmp(buf_1, "exit", 4) == 0 && strlen(buf_1) == 4) {
@@ -137,7 +137,6 @@ int analysis_command(const char *buffer, FILE *fp, Detail *detail, Detail *src_d
         return ERROR;
     }
     printf("========================================\n");
-    write_image_data(fp, detail);
     printf("file is updated\n");
     return OK;
 }
@@ -155,17 +154,19 @@ void ini_detail(Detail *detail) {
     detail->data = NULL;
 }
 
-void rgbstring_to_bgruint8(char *str, uint8_t *bgr) {
+int rgbstring_to_bgruint8(char *str, uint8_t *bgr) {
     int len = strlen(str);
-    if (len < 6) return;
+    if (len < 6) return ERROR;
     char str_fix[6] = {0};
     if ((str[len - 1]) == '0' && (str[len - 2]) == 'x' && len == 8) {
         strncpy(str_fix, str + 2, 6);
-    } else {
+    } else if (len == 6){
         strncpy(str_fix, str, 6);
+    } else {
+        return ERROR;
     }
     unsigned int tmp;
-    sscanf(str_fix, "%x", &tmp);  // B
+    sscanf(str_fix, "%x", &tmp);  // 
     
     bgr[0] = 0;
     bgr[1] = 0;
@@ -173,6 +174,7 @@ void rgbstring_to_bgruint8(char *str, uint8_t *bgr) {
     bgr[0] |= tmp & 0xFF;
     bgr[1] |= tmp>>8 & 0xFF;
     bgr[2] |= tmp>>16 & 0xFF;
+    return OK;
 }
 
 int main(int argc, const char *argv[]) {
@@ -209,10 +211,10 @@ int main(int argc, const char *argv[]) {
         }
         char tmp[S] = {0};
         memcpy(tmp, argv[6], strlen(argv[6]));
-        rgbstring_to_bgruint8(tmp, detail->bg_color);
+        if (!rgbstring_to_bgruint8(tmp, detail->bg_color)) return ERROR;
 
         ini_image_data(fp, detail);  // ini padding in detail
-        detail->data = update_image_data(fp, detail, NULL, NULL, 0, 0);
+        update_image_data(fp, detail, NULL, NULL, 0, 0);
         create_and_write_file_data(fp, detail);
         write_image_data(fp, detail);
     } else {
